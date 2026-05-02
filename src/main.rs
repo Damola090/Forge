@@ -1,14 +1,63 @@
+mod handler;
 mod request;
 mod response;
+mod router;
 
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use handler::{FnHandler, Handler};
 use request::Request;
-use response::{Response, StatusCode};
+use response::Response;
+use router::Router;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use std::collections::HashMap;
+
+fn build_router() -> Router {
+    let mut router = Router::new();
+
+    // GET /
+    router.get("/", Box::new(FnHandler::new(|_req, _params| {
+        Response::ok()
+             .body("<h1>Welcome to Forge</h1>", "text/html")
+    })));
+
+    // GET /health
+    router.get("/health", Box::new(FnHandler::new(|_req, _params| {
+        Response::ok()
+            .body(r#"{"status": "ok"}"#, "application/json")
+    })));
+
+    // GET /media/:id
+    // :id is a path parameter — extracted automatically by the router
+    router.get("/media/:id", Box::new(FnHandler::new(|_req, params| {
+        // params["id"] is whatever was in the URL
+        let id = params.get("id").map(|s| s.as_str()).unwrap_or("unknown");
+        let body = format!(r#"{{"id": "{}", "status": "found"}}"#, id);
+        Response::ok().body(&body, "application/json")
+    })));
+
+    // POST /media/upload
+    router.post("/media/upload", Box::new(FnHandler::new(|req, _params| {
+        // req.body contains the uploaded bytes
+        let size = req.body.len();
+        let body = format!(r#"{{"received": {} bytes}}"#, size);
+        Response::ok().body(&body, "application/json")
+    })));
+
+    // DELETE /media/:id
+    router.delete("/media/:id", Box::new(FnHandler::new(|_req, params| {
+        let id = params.get("id").map(|s| s.as_str()).unwrap_or("unknown");
+        let body = format!(r#"{{"deleted": "{}"}}"#, id);
+        Response::ok().body(&body, "application/json")
+    })));
+
+    router
+}
 
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let router = build_router();
+
     println!("Forge listening on port 8080");
 
     loop {
@@ -21,25 +70,8 @@ async fn main() {
         let response = match Request::parse(&buffer[..bytes_read]) {
             Ok(req) => {
                 println!("{:?} {}", req.method, req.path);
-
-                // Pattern match on the path — this is manual routing for now
-                // Phase 4 replaces this with a proper Router
-                match req.path.as_str() {
-                    "/" => Response::ok()
-                        .body("<h1>Welcome to Forge</h1>", "text/html"),
-
-                    "/health" => Response::ok()
-                        .body(r#"{"status": "ok"}"#, "application/json"),
-
-                    "/about" => Response::ok()
-                        .body("<h1>Forge HTTP Server</h1><p>Built from scratch in Rust</p>", "text/html"),
-
-                    // Catch-all — anything else is a 404
-                    _ => Response::not_found(),
-                }
+                router.handle(&req)
             }
-
-            // Parse failed — send a 400
             Err(e) => {
                 eprintln!("Parse error: {}", e);
                 Response::bad_request("Could not parse request")
