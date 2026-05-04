@@ -11,6 +11,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use std::collections::HashMap;
 
+use std::thread;
+use std::time::Duration;
+
 fn build_router() -> Router {
     let mut router = Router::new();
 
@@ -69,7 +72,15 @@ async fn main() {
 
         let response = match Request::parse(&buffer[..bytes_read]) {
             Ok(req) => {
-                println!("{:?} {}", req.method, req.path);
+                // println!("{:?} {}", req.method, req.path);
+                // router.handle(&req)
+
+                println!("{:?} {} — handling...", req.method, req.path);
+                
+                // Simulate slow work — database query, file processing, etc.
+                thread::sleep(Duration::from_secs(3));
+                
+                println!("{:?} {} — done", req.method, req.path);
                 router.handle(&req)
             }
             Err(e) => {
