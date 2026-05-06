@@ -8,7 +8,8 @@ use request::Request;
 use response::Response;
 use router::Router;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use std::sync::Arc;
 use std::collections::HashMap;
 
 use std::thread;
@@ -56,52 +57,91 @@ fn build_router() -> Router {
     router
 }
 
+// Handles one connection from start to finish
+// This runs as an independent Tokio task
+// Multiple of these run simultaneously
+async fn handle_connection(mut socket: TcpStream, router: Arc<Router>) {
+    let mut buffer = vec![0u8; 4096];
+    let bytes_read = match socket.read(&mut buffer).await {
+        Ok(0) => {
+            //0 bytes means the client closed the connection
+            return;
+        }
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("Read error: {}", e);
+            return;
+        }
+    };
+
+    let response = match Request::parse(&buffer[..bytes_read]) {
+        Ok(req) => {
+            // Simulate slow work
+            // tokio::time::sleep is async — it yields to the runtime
+            // while sleeping, other tasks can run
+            // this is fundamentally different from thread::sleep
+            // which blocks the entire OS thread
+            // tokio::time::sleep(Duration::from_secs(3)).await;
+
+            println!("{:?} {} — done", req.method, req.path);
+            router.handle(&req)
+        }
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            Response::bad_request("Could not parse request")
+        }
+    };
+
+    if let Err(e) = socket.write_all(&response.to_bytes()).await {
+        eprintln!("Write error: {}", e);
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
-    let router = build_router();
+    // Wrap the router in Arc so it can be shared across tasks
+    // Arc::new moves the router onto the heap
+    // Arc gives each task a reference-counted pointer to it
+    let router = Arc::new(build_router());
 
+
+    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
     println!("Forge listening on port 8080");
 
+
     loop {
-        let (mut socket, addr) = listener.accept().await.unwrap();
-        println!("Connection from {}", addr);
-
-        let mut buffer = vec![0u8; 4096];
-        let bytes_read = socket.read(&mut buffer).await.unwrap();
-
-        let response = match Request::parse(&buffer[..bytes_read]) {
-            Ok(req) => {
-                // println!("{:?} {}", req.method, req.path);
-                // router.handle(&req)
-
-                println!("{:?} {} — handling...", req.method, req.path);
-                
-                // Simulate slow work — database query, file processing, etc.
-                thread::sleep(Duration::from_secs(3));
-                
-                println!("{:?} {} — done", req.method, req.path);
-                router.handle(&req)
-            }
+        let (socket, addr) = match listener.accept().await{
+            Ok(conn) => conn,
             Err(e) => {
-                eprintln!("Parse error: {}", e);
-                Response::bad_request("Could not parse request")
+                eprintln!("Accept error: {}", e);
+                continue;
             }
         };
 
-        // Serialize the response to bytes and write back to the socket
-        // write_all guarantees every byte is sent — not just some of them
-        let response_bytes = response.to_bytes();
-        socket.write_all(&response_bytes).await.unwrap();
+        println!("Connection from {}", addr);
 
-        println!(
-            "Responded: {} {} → {}",
-            match request::Request::parse(&buffer[..bytes_read]) {
-                Ok(r) => format!("{:?}", r.method),
-                Err(_) => "??".to_string(),
-            },
-            "path",
-            response.status as u16
-        );
+        // Clone the Arc — not the router
+        // This increments the reference count by 1
+        // When the task finishes, the count decrements
+        // When count hits 0, the router is dropped
+        let router = Arc::clone(&router);
+        
+
+        // Spawn an independent task for this connection
+        // move takes ownership of socket and router_clone
+        // the loop immediately continues to accept() again
+        tokio::spawn(async move {
+            handle_connection(socket, router).await;
+        });
+
+        // println!(
+        //     "Responded: {} {} → {}",
+        //     match request::Request::parse(&buffer[..bytes_read]) {
+        //         Ok(r) => format!("{:?}", r.method),
+        //         Err(_) => "??".to_string(),
+        //     },
+        //     "path",
+        //     response.status as u16
+        // );
     }
 }

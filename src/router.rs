@@ -13,7 +13,7 @@ struct Route {
     // This is why we need Box — each handler is a different
     // concrete type with a different size
     // Box makes them all pointer-sized so Vec can hold them
-    handler: Box<dyn Handler>,
+    handler: Box<dyn Handler + Send + Sync>,
 }
 
 pub struct Router {
@@ -28,7 +28,7 @@ impl Router {
     }
 
     // Register a GET route
-    pub fn get(&mut self, pattern: &str, handler: Box<dyn Handler>) {
+    pub fn get(&mut self, pattern: &str, handler: Box<dyn Handler + Send + Sync>) {
         self.routes.push(Route {
             method: Method::Get,
             pattern: pattern.to_string(),
@@ -37,7 +37,7 @@ impl Router {
     }
 
     // Register a POST route
-    pub fn post(&mut self, pattern: &str, handler: Box<dyn Handler>) {
+    pub fn post(&mut self, pattern: &str, handler: Box<dyn Handler + Send + Sync>) {
         self.routes.push(Route {
             method: Method::Post,
             pattern: pattern.to_string(),
@@ -46,7 +46,7 @@ impl Router {
     }
 
     // Register a DELETE route
-    pub fn delete(&mut self, pattern: &str, handler: Box<dyn Handler>) {
+    pub fn delete(&mut self, pattern: &str, handler: Box<dyn Handler + Send + Sync>) {
         self.routes.push(Route {
             method: Method::Delete,
             pattern: pattern.to_string(),
