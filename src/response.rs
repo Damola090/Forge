@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 // Every HTTP response has these three parts
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Response {
     pub status: StatusCode,
     pub headers: HashMap<String, String>,
