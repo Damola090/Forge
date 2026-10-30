@@ -1,6 +1,6 @@
 use crate::handler::Handler;
 use crate::request::Request;
-use crate:: response::Response;
+use crate::response::Response;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -16,7 +16,6 @@ pub trait Middleware {
         //next is the inner handler - calling it continues the chain
         next: &dyn Handler,
     ) -> Response;
-
 }
 
 // ─── Logging Middleware ───────────────────────────────────────────
@@ -52,7 +51,6 @@ impl Middleware for LoggingMiddleware {
     }
 }
 
-
 // ─── Timing Middleware ────────────────────────────────────────────
 
 pub struct TimingMiddleware;
@@ -80,10 +78,7 @@ impl Middleware for TimingMiddleware {
 
         // Add timing as a response header
         // This lets API clients see how long the server took
-        response.header(
-            "X-Response-Time",
-            &format!("{:.3}ms", ms),
-        )
+        response.header("X-Response-Time", &format!("{:.3}ms", ms))
     }
 }
 
@@ -208,7 +203,12 @@ mod tests {
     }
 
     impl Middleware for Record {
-        fn handle(&self, req: &Request, params: &HashMap<String, String>, next: &dyn Handler) -> Response {
+        fn handle(
+            &self,
+            req: &Request,
+            params: &HashMap<String, String>,
+            next: &dyn Handler,
+        ) -> Response {
             self.log.lock().unwrap().push(format!("{} in", self.name));
             let response = next.handle(req, params);
             self.log.lock().unwrap().push(format!("{} out", self.name));
@@ -220,7 +220,12 @@ mod tests {
     struct Reject;
 
     impl Middleware for Reject {
-        fn handle(&self, _req: &Request, _params: &HashMap<String, String>, _next: &dyn Handler) -> Response {
+        fn handle(
+            &self,
+            _req: &Request,
+            _params: &HashMap<String, String>,
+            _next: &dyn Handler,
+        ) -> Response {
             Response::bad_request("rejected")
         }
     }
@@ -238,12 +243,21 @@ mod tests {
             handler_log.lock().unwrap().push("handler".to_string());
             Response::ok()
         })))
-        .with(Box::new(Record { name: "A", log: Arc::clone(&log) }))
-        .with(Box::new(Record { name: "B", log: Arc::clone(&log) }));
+        .with(Box::new(Record {
+            name: "A",
+            log: Arc::clone(&log),
+        }))
+        .with(Box::new(Record {
+            name: "B",
+            log: Arc::clone(&log),
+        }));
 
         chain.handle(&get(), &HashMap::new());
 
-        assert_eq!(*log.lock().unwrap(), vec!["A in", "B in", "handler", "B out", "A out"]);
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["A in", "B in", "handler", "B out", "A out"]
+        );
     }
 
     #[test]

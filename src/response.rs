@@ -28,13 +28,13 @@ impl StatusCode {
     // The browser doesn't use this but it's part of the HTTP spec
     pub fn reason(&self) -> &str {
         match self {
-            StatusCode::Ok                  => "OK",
-            StatusCode::Created             => "Created",
-            StatusCode::NoContent           => "No Content",
-            StatusCode::BadRequest          => "Bad Request",
-            StatusCode::NotFound            => "Not Found",
-            StatusCode::MethodNotAllowed    => "Method Not Allowed",
-            StatusCode::PayloadTooLarge     => "Payload Too Large",
+            StatusCode::Ok => "OK",
+            StatusCode::Created => "Created",
+            StatusCode::NoContent => "No Content",
+            StatusCode::BadRequest => "Bad Request",
+            StatusCode::NotFound => "Not Found",
+            StatusCode::MethodNotAllowed => "Method Not Allowed",
+            StatusCode::PayloadTooLarge => "Payload Too Large",
             StatusCode::RequestHeaderFieldsTooLarge => "Request Header Fields Too Large",
             StatusCode::InternalServerError => "Internal Server Error",
         }
@@ -57,38 +57,31 @@ impl Response {
     }
 
     pub fn not_found() -> Self {
-        Self::new(StatusCode::NotFound)
-            .body("<h1>404 Not Found</h1>", "text/html")
+        Self::new(StatusCode::NotFound).body("<h1>404 Not Found</h1>", "text/html")
     }
 
     pub fn bad_request(msg: &str) -> Self {
-        Self::new(StatusCode::BadRequest)
-            .body(msg, "text/plain")
+        Self::new(StatusCode::BadRequest).body(msg, "text/plain")
     }
 
     pub fn internal_error() -> Self {
-        Self::new(StatusCode::InternalServerError)
-            .body("Internal Server Error", "text/plain")
+        Self::new(StatusCode::InternalServerError).body("Internal Server Error", "text/plain")
     }
 
     // Builder methods — set body and content-type together
     // Returns Self so you can chain: Response::ok().body("hello", "text/plain")
     pub fn body(mut self, content: &str, content_type: &str) -> Self {
         self.body = content.as_bytes().to_vec();
-        self.headers.insert(
-            "Content-Type".to_string(),
-            content_type.to_string(),
-        );
+        self.headers
+            .insert("Content-Type".to_string(), content_type.to_string());
         self
     }
 
     // For binary responses — images, video bytes, downloads
     pub fn bytes(mut self, data: Vec<u8>, content_type: &str) -> Self {
         self.body = data;
-        self.headers.insert(
-            "Content-Type".to_string(),
-            content_type.to_string(),
-        );
+        self.headers
+            .insert("Content-Type".to_string(), content_type.to_string());
         self
     }
 
@@ -114,10 +107,7 @@ impl Response {
         // Content-Length is mandatory — without it the browser
         // doesn't know when the response body ends and hangs forever
         // This is why Safari kept retrying — no response at all
-        let content_length = format!(
-            "Content-Length: {}\r\n",
-            self.body.len()
-        );
+        let content_length = format!("Content-Length: {}\r\n", self.body.len());
         output.extend_from_slice(content_length.as_bytes());
 
         // Write all other headers
