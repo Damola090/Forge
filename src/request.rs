@@ -137,6 +137,9 @@ impl Request {
     }
 
     // Convenience — get content length if present
+    // Not used by the server — read_request needs the length before the
+    // request is parsed, so it reads the raw header instead. Kept for handlers
+    #[allow(dead_code)]
     pub fn content_length(&self) -> usize {
         self.header("content-length")
             .and_then(|v| v.parse().ok())
