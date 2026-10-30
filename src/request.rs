@@ -64,27 +64,22 @@ impl Request {
     // This is the function that makes HTTP readable
     pub fn parse(raw: &[u8]) -> Result<Self, ParseError> {
 
-        // Convert bytes to a string so we can work with text
-        // from_utf8_lossy replaces invalid UTF-8 with a placeholder
-        // instead of panicking — important for real network data
-        let text = String::from_utf8_lossy(raw);
-
-        if text.is_empty() {
+        if raw.is_empty() {
             return Err(ParseError::EmptyRequest);
         }
 
         // Split headers from body on the blank line
-        // HTTP spec says headers end at \r\n\r\n
-        // Everything before is headers, everything after is body
-        let (header_section, body) = match text.split_once("\r\n\r\n") {
-            Some((h, b)) => (h, b),
-            // Some clients send \n\n instead of \r\n\r\n
-            // be lenient — accept both
-            None => match text.split_once("\n\n") {
-                Some((h, b)) => (h, b),
-                None => (text.as_ref(), ""),
-            }
+        // Done on the raw bytes, not on text — the body can be binary
+        // (images, video) and converting it to a string would corrupt it
+        let (header_bytes, body) = match header_end(raw) {
+            Some((headers_end, body_start)) => (&raw[..headers_end], &raw[body_start..]),
+            None => (raw, &[][..]),
         };
+
+        // Convert the header bytes to a string so we can work with text
+        // from_utf8_lossy replaces invalid UTF-8 with a placeholder
+        // instead of panicking — important for real network data
+        let header_section = String::from_utf8_lossy(header_bytes);
 
         // Split the header section into individual lines
         let mut lines = header_section.lines();
@@ -138,7 +133,7 @@ impl Request {
             method,
             path,
             headers,
-            body: body.as_bytes().to_vec(),
+            body: body.to_vec(),
             query_string,
         })
     }
@@ -154,6 +149,21 @@ impl Request {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     }
+}
+
+// Find where the headers end
+// HTTP spec says headers end at \r\n\r\n
+// Some clients send \n\n instead — be lenient, accept both
+// Returns (end of the header section, start of the body)
+pub fn header_end(raw: &[u8]) -> Option<(usize, usize)> {
+    if let Some(pos) = find(raw, b"\r\n\r\n") {
+        return Some((pos, pos + 4));
+    }
+    find(raw, b"\n\n").map(|pos| (pos, pos + 2))
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 impl Method {
@@ -172,3 +182,72 @@ impl Method {
 }
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_method_path_query_headers_and_body() {
+        let raw = b"POST /search?q=rust HTTP/1.1\r\nHost: localhost\r\nX-Time: 10:30\r\n\r\nhello";
+        let req = Request::parse(raw).unwrap();
+
+        assert_eq!(req.method, Method::Post);
+        assert_eq!(req.path, "/search");
+        assert_eq!(req.query_string.as_deref(), Some("q=rust"));
+        // Value keeps everything after the first colon
+        assert_eq!(req.header("x-time").map(String::as_str), Some("10:30"));
+        assert_eq!(req.body, b"hello");
+    }
+
+    #[test]
+    fn header_lookup_is_case_insensitive() {
+        let req = Request::parse(b"GET / HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n").unwrap();
+        assert_eq!(req.header("CONTENT-TYPE").map(String::as_str), Some("text/plain"));
+    }
+
+    #[test]
+    fn body_keeps_binary_bytes() {
+        // Invalid UTF-8 must come through untouched — uploads can be images or video
+        let req = Request::parse(b"POST / HTTP/1.1\r\n\r\n\x00\xff\x80hi").unwrap();
+        assert_eq!(req.body, vec![0x00, 0xff, 0x80, b'h', b'i']);
+    }
+
+    #[test]
+    fn accepts_bare_newlines() {
+        let req = Request::parse(b"GET /health HTTP/1.1\nHost: x\n\nbody").unwrap();
+        assert_eq!(req.path, "/health");
+        assert_eq!(req.body, b"body");
+    }
+
+    #[test]
+    fn rejects_bad_requests() {
+        assert!(matches!(Request::parse(b""), Err(ParseError::EmptyRequest)));
+        assert!(matches!(
+            Request::parse(b"FOO / HTTP/1.1\r\n\r\n"),
+            Err(ParseError::InvalidMethod(m)) if m == "FOO"
+        ));
+        assert!(matches!(Request::parse(b"GET\r\n\r\n"), Err(ParseError::MissingPath)));
+    }
+
+    #[test]
+    fn content_length_defaults_to_zero() {
+        let req = Request::parse(b"POST / HTTP/1.1\r\nContent-Length: 12\r\n\r\n").unwrap();
+        assert_eq!(req.content_length(), 12);
+
+        let req = Request::parse(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+        assert_eq!(req.content_length(), 0);
+
+        let req = Request::parse(b"GET / HTTP/1.1\r\nContent-Length: abc\r\n\r\n").unwrap();
+        assert_eq!(req.content_length(), 0);
+    }
+
+    #[test]
+    fn header_end_finds_both_separators() {
+        // (end of headers, start of body)
+        assert_eq!(header_end(b"GET / HTTP/1.1\r\n\r\nbody"), Some((14, 18)));
+        assert_eq!(header_end(b"GET / HTTP/1.1\n\nbody"), Some((14, 16)));
+        // Headers not finished yet
+        assert_eq!(header_end(b"GET / HTTP/1.1\r\nHost: x\r\n"), None);
+    }
+}
