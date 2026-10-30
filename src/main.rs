@@ -303,3 +303,124 @@ async fn main() {
         // );
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A connected pair of sockets on localhost
+    // Whatever is written to `client` can be read by read_request from `server`
+    async fn socket_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn raw_header_helpers() {
+        let headers = b"POST / HTTP/1.1\r\ncontent-LENGTH: 42\r\nExpect: 100-Continue";
+
+        assert_eq!(content_length(headers), 42);
+        assert!(expects_continue(headers));
+        assert_eq!(content_length(b"GET / HTTP/1.1\r\n"), 0);
+        assert!(!expects_continue(b"GET / HTTP/1.1\r\n"));
+    }
+
+    #[tokio::test]
+    async fn reads_a_body_bigger_than_one_read() {
+        let (mut client, mut server) = socket_pair().await;
+        let body = vec![b'a'; 10_000];
+        let mut request = format!("POST /media/upload HTTP/1.1\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+        request.extend_from_slice(&body);
+        client.write_all(&request).await.unwrap();
+
+        let mut pending = Vec::new();
+        let raw = match read_request(&mut server, &mut pending).await {
+            Ok(raw) => raw,
+            Err(_) => panic!("read_request failed"),
+        };
+
+        assert_eq!(Request::parse(&raw).unwrap().body.len(), 10_000);
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reads_a_request_split_across_writes() {
+        let (mut client, mut server) = socket_pair().await;
+
+        tokio::spawn(async move {
+            for part in ["POST / HTTP/1.1\r\nCont", "ent-Length: 10\r\n\r\n12345", "67890"] {
+                client.write_all(part.as_bytes()).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        });
+
+        let mut pending = Vec::new();
+        let raw = match read_request(&mut server, &mut pending).await {
+            Ok(raw) => raw,
+            Err(_) => panic!("read_request failed"),
+        };
+
+        assert_eq!(Request::parse(&raw).unwrap().body, b"1234567890");
+    }
+
+    #[tokio::test]
+    async fn keeps_pipelined_bytes_for_the_next_request() {
+        let (mut client, mut server) = socket_pair().await;
+        client
+            .write_all(b"POST /a HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcGET /b HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut pending = Vec::new();
+        let first = match read_request(&mut server, &mut pending).await {
+            Ok(raw) => Request::parse(&raw).unwrap(),
+            Err(_) => panic!("first read_request failed"),
+        };
+        let second = match read_request(&mut server, &mut pending).await {
+            Ok(raw) => Request::parse(&raw).unwrap(),
+            Err(_) => panic!("second read_request failed"),
+        };
+
+        assert_eq!((first.path.as_str(), first.body.as_slice()), ("/a", &b"abc"[..]));
+        assert_eq!(second.path, "/b");
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_requests() {
+        let (mut client, mut server) = socket_pair().await;
+        let request = format!("POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n", MAX_BODY_SIZE + 1);
+        client.write_all(request.as_bytes()).await.unwrap();
+        let mut pending = Vec::new();
+        assert!(matches!(read_request(&mut server, &mut pending).await, Err(ReadError::BodyTooLarge)));
+
+        let (mut client, mut server) = socket_pair().await;
+        let big_header = format!("GET / HTTP/1.1\r\nX-Big: {}\r\n", "a".repeat(MAX_HEADER_SIZE * 2));
+        client.write_all(big_header.as_bytes()).await.unwrap();
+        let mut pending = Vec::new();
+        assert!(matches!(read_request(&mut server, &mut pending).await, Err(ReadError::HeadersTooLarge)));
+    }
+
+    #[tokio::test]
+    async fn reports_closed_connection() {
+        let (client, mut server) = socket_pair().await;
+        drop(client);
+
+        let mut pending = Vec::new();
+        assert!(matches!(read_request(&mut server, &mut pending).await, Err(ReadError::Closed)));
+    }
+
+    #[test]
+    fn forge_routes_answer() {
+        let router = build_router();
+        let send = |raw: &[u8]| router.handle(&Request::parse(raw).unwrap());
+
+        assert_eq!(send(b"GET / HTTP/1.1\r\n\r\n").status as u16, 200);
+        assert_eq!(send(b"GET /health HTTP/1.1\r\n\r\n").body, br#"{"status": "ok"}"#);
+        assert_eq!(send(b"GET /media/abc HTTP/1.1\r\n\r\n").body, br#"{"id": "abc", "status": "found"}"#);
+        assert_eq!(send(b"POST /media/upload HTTP/1.1\r\n\r\nhello").body, br#"{"received": "5 bytes"}"#);
+        assert_eq!(send(b"DELETE /media/abc HTTP/1.1\r\n\r\n").body, br#"{"deleted": "abc"}"#);
+        assert_eq!(send(b"GET /nope HTTP/1.1\r\n\r\n").status as u16, 404);
+    }
+}

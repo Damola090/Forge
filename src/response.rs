@@ -136,3 +136,56 @@ impl Response {
         output
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(response: &Response) -> String {
+        String::from_utf8_lossy(&response.to_bytes()).to_string()
+    }
+
+    #[test]
+    fn serializes_status_line_headers_and_body() {
+        let out = text(&Response::ok().body("hello", "text/plain"));
+
+        assert!(out.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(out.contains("Content-Length: 5\r\n"));
+        assert!(out.contains("Content-Type: text/plain\r\n"));
+        // Blank line, then the body
+        assert!(out.ends_with("\r\n\r\nhello"));
+    }
+
+    #[test]
+    fn content_length_counts_bytes_not_characters() {
+        // "→" is 3 bytes in UTF-8
+        let out = text(&Response::ok().body("→", "text/plain"));
+        assert!(out.contains("Content-Length: 3\r\n"));
+    }
+
+    #[test]
+    fn shortcut_constructors() {
+        assert!(text(&Response::not_found()).starts_with("HTTP/1.1 404 Not Found\r\n"));
+        assert!(text(&Response::bad_request("nope")).ends_with("\r\n\r\nnope"));
+
+        let out = text(&Response::internal_error());
+        assert!(out.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+        assert!(out.ends_with("\r\n\r\nInternal Server Error"));
+    }
+
+    #[test]
+    fn bytes_keeps_binary_body() {
+        let data = vec![0u8, 255, 128, 10];
+        let response = Response::ok().bytes(data.clone(), "image/png");
+
+        assert_eq!(response.body, data);
+        let out = text(&response);
+        assert!(out.contains("Content-Type: image/png\r\n"));
+        assert!(out.contains("Content-Length: 4\r\n"));
+    }
+
+    #[test]
+    fn header_adds_custom_header() {
+        let out = text(&Response::ok().header("X-Test", "1"));
+        assert!(out.contains("X-Test: 1\r\n"));
+    }
+}

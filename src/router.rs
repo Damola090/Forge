@@ -114,3 +114,61 @@ fn match_pattern(pattern: &str, path: &str) -> Option<HashMap<String, String>> {
     Some(params)
 
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handler::FnHandler;
+
+    fn text(response: &Response) -> String {
+        String::from_utf8_lossy(&response.to_bytes()).to_string()
+    }
+
+    fn send(router: &Router, raw: &[u8]) -> String {
+        text(&router.handle(&Request::parse(raw).unwrap()))
+    }
+
+    fn test_router() -> Router {
+        let mut router = Router::new();
+        router.get("/health", Box::new(FnHandler::new(|_req, _params| {
+            Response::ok().body("ok", "text/plain")
+        })));
+        router.get("/media/:id", Box::new(FnHandler::new(|_req, params| {
+            Response::ok().body(&format!("get {}", params["id"]), "text/plain")
+        })));
+        router.delete("/media/:id", Box::new(FnHandler::new(|_req, params| {
+            Response::ok().body(&format!("delete {}", params["id"]), "text/plain")
+        })));
+        router
+    }
+
+    #[test]
+    fn match_pattern_static_and_params() {
+        assert_eq!(match_pattern("/health", "/health"), Some(HashMap::new()));
+        assert_eq!(match_pattern("/health", "/status"), None);
+
+        let params = match_pattern("/media/:id/transcode", "/media/abc/transcode").unwrap();
+        assert_eq!(params["id"], "abc");
+
+        // Different number of segments never matches
+        assert_eq!(match_pattern("/media/:id", "/media/abc/extra"), None);
+        assert_eq!(match_pattern("/media/:id", "/media"), None);
+    }
+
+    #[test]
+    fn routes_by_method_and_path() {
+        let router = test_router();
+
+        assert!(send(&router, b"GET /health HTTP/1.1\r\n\r\n").ends_with("ok"));
+        assert!(send(&router, b"GET /media/42 HTTP/1.1\r\n\r\n").ends_with("get 42"));
+        assert!(send(&router, b"DELETE /media/42 HTTP/1.1\r\n\r\n").ends_with("delete 42"));
+    }
+
+    #[test]
+    fn unmatched_requests_get_404() {
+        let router = test_router();
+
+        assert!(send(&router, b"GET /nope HTTP/1.1\r\n\r\n").starts_with("HTTP/1.1 404"));
+        // Path exists, method doesn't — currently 404 too
+        assert!(send(&router, b"POST /health HTTP/1.1\r\n\r\n").starts_with("HTTP/1.1 404"));
+    }
+}

@@ -193,3 +193,109 @@ impl Handler for Next<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handler::FnHandler;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    // Records when it runs, before and after calling next
+    struct Record {
+        name: &'static str,
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Middleware for Record {
+        fn handle(&self, req: &Request, params: &HashMap<String, String>, next: &dyn Handler) -> Response {
+            self.log.lock().unwrap().push(format!("{} in", self.name));
+            let response = next.handle(req, params);
+            self.log.lock().unwrap().push(format!("{} out", self.name));
+            response
+        }
+    }
+
+    // Never calls next — like an auth check that fails
+    struct Reject;
+
+    impl Middleware for Reject {
+        fn handle(&self, _req: &Request, _params: &HashMap<String, String>, _next: &dyn Handler) -> Response {
+            Response::bad_request("rejected")
+        }
+    }
+
+    fn get() -> Request {
+        Request::parse(b"GET / HTTP/1.1\r\n\r\n").unwrap()
+    }
+
+    #[test]
+    fn first_added_is_outermost() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let handler_log = Arc::clone(&log);
+
+        let chain = MiddlewareChain::new(Box::new(FnHandler::new(move |_req, _params| {
+            handler_log.lock().unwrap().push("handler".to_string());
+            Response::ok()
+        })))
+        .with(Box::new(Record { name: "A", log: Arc::clone(&log) }))
+        .with(Box::new(Record { name: "B", log: Arc::clone(&log) }));
+
+        chain.handle(&get(), &HashMap::new());
+
+        assert_eq!(*log.lock().unwrap(), vec!["A in", "B in", "handler", "B out", "A out"]);
+    }
+
+    #[test]
+    fn middleware_can_stop_the_request() {
+        let ran = Arc::new(Mutex::new(false));
+        let handler_ran = Arc::clone(&ran);
+
+        let chain = MiddlewareChain::new(Box::new(FnHandler::new(move |_req, _params| {
+            *handler_ran.lock().unwrap() = true;
+            Response::ok()
+        })))
+        .with(Box::new(Reject));
+
+        let response = chain.handle(&get(), &HashMap::new());
+
+        assert_eq!(response.status as u16, 400);
+        assert!(!*ran.lock().unwrap(), "handler should not run");
+    }
+
+    #[test]
+    fn empty_chain_just_runs_the_handler() {
+        let chain = MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| {
+            Response::ok().body("hi", "text/plain")
+        })));
+
+        assert_eq!(chain.handle(&get(), &HashMap::new()).body, b"hi");
+    }
+
+    #[test]
+    fn timing_measures_the_handler() {
+        let chain = MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| {
+            std::thread::sleep(Duration::from_millis(50));
+            Response::ok()
+        })))
+        .with(Box::new(TimingMiddleware));
+
+        let response = chain.handle(&get(), &HashMap::new());
+        let ms: f64 = response.headers["X-Response-Time"]
+            .trim_end_matches("ms")
+            .parse()
+            .unwrap();
+
+        assert!(ms >= 50.0, "took {}ms", ms);
+    }
+
+    #[test]
+    fn request_id_header_is_added() {
+        let chain = MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| Response::ok())))
+            .with(Box::new(RequestIdMiddleware));
+
+        let response = chain.handle(&get(), &HashMap::new());
+
+        assert!(response.headers["X-Request-Id"].starts_with("req_"));
+    }
+}
