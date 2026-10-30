@@ -18,6 +18,8 @@ pub enum StatusCode {
     BadRequest = 400,
     NotFound = 404,
     MethodNotAllowed = 405,
+    PayloadTooLarge = 413,
+    RequestHeaderFieldsTooLarge = 431,
     InternalServerError = 500,
 }
 
@@ -32,6 +34,8 @@ impl StatusCode {
             StatusCode::BadRequest          => "Bad Request",
             StatusCode::NotFound            => "Not Found",
             StatusCode::MethodNotAllowed    => "Method Not Allowed",
+            StatusCode::PayloadTooLarge     => "Payload Too Large",
+            StatusCode::RequestHeaderFieldsTooLarge => "Request Header Fields Too Large",
             StatusCode::InternalServerError => "Internal Server Error",
         }
     }

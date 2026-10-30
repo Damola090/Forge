@@ -72,16 +72,17 @@ impl Middleware for TimingMiddleware {
         // Calculate duration after handler returns
         let duration = start.elapsed();
 
-        println!(
-            "  took {}ms",
-            duration.as_millis()
-        );
+        // Fractional milliseconds — most handlers finish in well
+        // under 1ms, which as_millis() would round down to 0
+        let ms = duration.as_secs_f64() * 1000.0;
+
+        println!("  took {:.3}ms", ms);
 
         // Add timing as a response header
         // This lets API clients see how long the server took
         response.header(
             "X-Response-Time",
-            &format!("{}ms", duration.as_millis()),
+            &format!("{:.3}ms", ms),
         )
     }
 }
@@ -151,54 +152,44 @@ impl MiddlewareChain {
 
 impl Handler for MiddlewareChain {
     fn handle(&self, req: &Request, params: &HashMap<String, String>) -> Response {
-        // Build the chain from the outside in
-        // Each middleware wraps the next one
-        // The innermost is the actual handler
-
-        // Start with the inner handler
-        // Work outward through middleware in reverse
-        // so the first middleware added runs first
-        let mut current: &dyn Handler = self.inner.as_ref();
-
-        // For a simple chain we call them sequentially
-        // Each middleware calls next.handle() to continue
-        // We need a different approach for a dynamic chain
-
-        // Simple sequential approach — works for our use case
-        // Each middleware in the stack gets called with the inner handler
-        // They all share the same inner handler reference
-        if self.middlewares.is_empty() {
-            return current.handle(req, params);
+        // Start at the outermost middleware
+        // Each one calls next.handle() to run the rest of the chain
+        Next {
+            middlewares: &self.middlewares,
+            inner: self.inner.as_ref(),
         }
-
-        // Run middleware in order, each calling the next
-        // For simplicity here we run them sequentially
-        // and compose the response transformations
-        let mut response = current.handle(req, params);
-
-        // Apply middleware in reverse — outermost last
-        // This simulates the wrap-around behavior
-        for middleware in self.middlewares.iter().rev() {
-            // Create a temporary handler that returns our current response
-            // This lets each middleware wrap the already-computed response
-            let temp = ResponseHandler { response };
-            response = middleware.handle(req, params, &temp);
-        }
-
-        response
+        .handle(req, params)
     }
 }
 
-// Helper — a Handler that just returns a pre-computed response
-// Used internally by MiddlewareChain
-struct ResponseHandler {
-    response: Response,
+// The rest of the chain, from one middleware's point of view
+// Calling handle() runs the next middleware — which gets its own Next
+// for the middleware after it — until none are left and the real
+// handler runs. Each middleware wraps everything inside it:
+//
+//   Logging → Timing → RequestId → handler → RequestId → Timing → Logging
+//
+// This is how Timing measures the handler and Logging sees the request
+// before anything else runs
+struct Next<'a> {
+    middlewares: &'a [Box<dyn Middleware + Send + Sync>],
+    inner: &'a dyn Handler,
 }
 
-impl Handler for ResponseHandler {
-    fn handle(&self, _req: &Request, _params: &HashMap<String, String>) -> Response {
-        // Clone the response — Response needs to derive Clone
-        // We'll add that in a moment
-        self.response.clone()
+impl Handler for Next<'_> {
+    fn handle(&self, req: &Request, params: &HashMap<String, String>) -> Response {
+        match self.middlewares.split_first() {
+            // Run this middleware, handing it the remainder of the chain
+            Some((middleware, rest)) => middleware.handle(
+                req,
+                params,
+                &Next {
+                    middlewares: rest,
+                    inner: self.inner,
+                },
+            ),
+            // No middleware left — run the actual handler
+            None => self.inner.handle(req, params),
+        }
     }
 }
