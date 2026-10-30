@@ -22,9 +22,7 @@ pub struct Router {
 
 impl Router {
     pub fn new() -> Self {
-        Self {
-            routes: Vec::new(),
-        }
+        Self { routes: Vec::new() }
     }
 
     // Register a GET route
@@ -80,15 +78,9 @@ impl Router {
 // "/health" matches "/health" exactly
 
 fn match_pattern(pattern: &str, path: &str) -> Option<HashMap<String, String>> {
-    let pattern_parts: Vec<&str> = pattern
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let pattern_parts: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
 
-    let path_parts: Vec<&str> = path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let path_parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
     // Different number of segments — no match
     // "/media/:id" has 2 segments, "/media/abc/extra" has 3 — no match
@@ -112,7 +104,6 @@ fn match_pattern(pattern: &str, path: &str) -> Option<HashMap<String, String>> {
     }
 
     Some(params)
-
 }
 #[cfg(test)]
 mod tests {
@@ -129,15 +120,24 @@ mod tests {
 
     fn test_router() -> Router {
         let mut router = Router::new();
-        router.get("/health", Box::new(FnHandler::new(|_req, _params| {
-            Response::ok().body("ok", "text/plain")
-        })));
-        router.get("/media/:id", Box::new(FnHandler::new(|_req, params| {
-            Response::ok().body(&format!("get {}", params["id"]), "text/plain")
-        })));
-        router.delete("/media/:id", Box::new(FnHandler::new(|_req, params| {
-            Response::ok().body(&format!("delete {}", params["id"]), "text/plain")
-        })));
+        router.get(
+            "/health",
+            Box::new(FnHandler::new(|_req, _params| {
+                Response::ok().body("ok", "text/plain")
+            })),
+        );
+        router.get(
+            "/media/:id",
+            Box::new(FnHandler::new(|_req, params| {
+                Response::ok().body(&format!("get {}", params["id"]), "text/plain")
+            })),
+        );
+        router.delete(
+            "/media/:id",
+            Box::new(FnHandler::new(|_req, params| {
+                Response::ok().body(&format!("delete {}", params["id"]), "text/plain")
+            })),
+        );
         router
     }
 

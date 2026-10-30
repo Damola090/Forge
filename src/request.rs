@@ -36,10 +36,10 @@ pub enum ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::EmptyRequest        => write!(f, "Empty request"),
-            ParseError::InvalidRequestLine  => write!(f, "Invalid request line"),
-            ParseError::InvalidMethod(m)    => write!(f, "Unknown method: {}", m),
-            ParseError::MissingPath         => write!(f, "Missing path"),
+            ParseError::EmptyRequest => write!(f, "Empty request"),
+            ParseError::InvalidRequestLine => write!(f, "Invalid request line"),
+            ParseError::InvalidMethod(m) => write!(f, "Unknown method: {}", m),
+            ParseError::MissingPath => write!(f, "Missing path"),
         }
     }
 }
@@ -63,7 +63,6 @@ impl Request {
     // Takes raw bytes from the socket and returns a structured Request
     // This is the function that makes HTTP readable
     pub fn parse(raw: &[u8]) -> Result<Self, ParseError> {
-
         if raw.is_empty() {
             return Err(ParseError::EmptyRequest);
         }
@@ -85,20 +84,14 @@ impl Request {
         let mut lines = header_section.lines();
 
         // First line is always the request line: GET /path HTTP/1.1
-        let request_line = lines
-            .next()
-            .ok_or(ParseError::InvalidRequestLine)?;
+        let request_line = lines.next().ok_or(ParseError::InvalidRequestLine)?;
 
         // Split the request line into its three parts
         let mut parts = request_line.split_whitespace();
 
-        let method_str = parts
-            .next()
-            .ok_or(ParseError::InvalidRequestLine)?;
+        let method_str = parts.next().ok_or(ParseError::InvalidRequestLine)?;
 
-        let raw_path = parts
-            .next()
-            .ok_or(ParseError::MissingPath)?;
+        let raw_path = parts.next().ok_or(ParseError::MissingPath)?;
 
         // _version is the HTTP version — we read it but don't use it yet
         let _version = parts.next();
@@ -110,7 +103,7 @@ impl Request {
         // /search?q=rust&page=2  →  path="/search", query="q=rust&page=2"
         let (path, query_string) = match raw_path.split_once('?') {
             Some((p, q)) => (p.to_string(), Some(q.to_string())),
-            None         => (raw_path.to_string(), None),
+            None => (raw_path.to_string(), None),
         };
 
         // Parse remaining lines as headers
@@ -123,7 +116,7 @@ impl Request {
             // e.g. Date: Mon, 01 Jan 2026 00:00:00 GMT
             if let Some((key, value)) = line.split_once(':') {
                 headers.insert(
-                    key.trim().to_lowercase(),   // normalize to lowercase
+                    key.trim().to_lowercase(), // normalize to lowercase
                     value.trim().to_string(),
                 );
             }
@@ -169,19 +162,17 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 impl Method {
     pub fn parse(s: &str) -> Result<Self, ParseError> {
         match s.to_uppercase().as_str() {
-            "GET"     => Ok(Method::Get),
-            "POST"    => Ok(Method::Post),
-            "PUT"     => Ok(Method::Put),
-            "DELETE"  => Ok(Method::Delete),
-            "PATCH"   => Ok(Method::Patch),
-            "HEAD"    => Ok(Method::Head),
+            "GET" => Ok(Method::Get),
+            "POST" => Ok(Method::Post),
+            "PUT" => Ok(Method::Put),
+            "DELETE" => Ok(Method::Delete),
+            "PATCH" => Ok(Method::Patch),
+            "HEAD" => Ok(Method::Head),
             "OPTIONS" => Ok(Method::Options),
-            other     => Err(ParseError::InvalidMethod(other.to_string())),
+            other => Err(ParseError::InvalidMethod(other.to_string())),
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -203,7 +194,10 @@ mod tests {
     #[test]
     fn header_lookup_is_case_insensitive() {
         let req = Request::parse(b"GET / HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n").unwrap();
-        assert_eq!(req.header("CONTENT-TYPE").map(String::as_str), Some("text/plain"));
+        assert_eq!(
+            req.header("CONTENT-TYPE").map(String::as_str),
+            Some("text/plain")
+        );
     }
 
     #[test]
@@ -227,7 +221,10 @@ mod tests {
             Request::parse(b"FOO / HTTP/1.1\r\n\r\n"),
             Err(ParseError::InvalidMethod(m)) if m == "FOO"
         ));
-        assert!(matches!(Request::parse(b"GET\r\n\r\n"), Err(ParseError::MissingPath)));
+        assert!(matches!(
+            Request::parse(b"GET\r\n\r\n"),
+            Err(ParseError::MissingPath)
+        ));
     }
 
     #[test]

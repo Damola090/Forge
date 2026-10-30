@@ -1,18 +1,18 @@
 mod handler;
+mod middleware;
 mod request;
 mod response;
 mod router;
-mod middleware;
 
 use handler::{FnHandler, Handler};
+use middleware::{LoggingMiddleware, MiddlewareChain, RequestIdMiddleware, TimingMiddleware};
 use request::Request;
 use response::{Response, StatusCode};
 use router::Router;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use middleware::{LoggingMiddleware, MiddlewareChain, RequestIdMiddleware, TimingMiddleware};
-use std::sync::Arc;
-use std::collections::HashMap;
 
 use std::thread;
 use std::time::Duration;
@@ -24,56 +24,71 @@ fn build_router() -> Router {
     // Every route gets logging, timing, and request ID automatically
     // The handler itself knows nothing about any of this
 
-    router.get("/", Box::new(
-        MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| {
-            Response::ok().body("<h1>Welcome to Forge</h1>", "text/html")
-        })))
-        .with(Box::new(LoggingMiddleware))
-        .with(Box::new(TimingMiddleware))
-        .with(Box::new(RequestIdMiddleware))
-    ));
+    router.get(
+        "/",
+        Box::new(
+            MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| {
+                Response::ok().body("<h1>Welcome to Forge</h1>", "text/html")
+            })))
+            .with(Box::new(LoggingMiddleware))
+            .with(Box::new(TimingMiddleware))
+            .with(Box::new(RequestIdMiddleware)),
+        ),
+    );
 
-    router.get("/health", Box::new(
-        MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| {
-            Response::ok().body(r#"{"status": "ok"}"#, "application/json")
-        })))
-        .with(Box::new(LoggingMiddleware))
-        .with(Box::new(TimingMiddleware))
-        .with(Box::new(RequestIdMiddleware))
-    ));
+    router.get(
+        "/health",
+        Box::new(
+            MiddlewareChain::new(Box::new(FnHandler::new(|_req, _params| {
+                Response::ok().body(r#"{"status": "ok"}"#, "application/json")
+            })))
+            .with(Box::new(LoggingMiddleware))
+            .with(Box::new(TimingMiddleware))
+            .with(Box::new(RequestIdMiddleware)),
+        ),
+    );
 
-    router.get("/media/:id", Box::new(
-        MiddlewareChain::new(Box::new(FnHandler::new(|_req, params| {
-            let id = params.get("id").map(|s| s.as_str()).unwrap_or("unknown");
-            let body = format!(r#"{{"id": "{}", "status": "found"}}"#, id);
-            Response::ok().body(&body, "application/json")
-        })))
-        .with(Box::new(LoggingMiddleware))
-        .with(Box::new(TimingMiddleware))
-        .with(Box::new(RequestIdMiddleware))
-    ));
+    router.get(
+        "/media/:id",
+        Box::new(
+            MiddlewareChain::new(Box::new(FnHandler::new(|_req, params| {
+                let id = params.get("id").map(|s| s.as_str()).unwrap_or("unknown");
+                let body = format!(r#"{{"id": "{}", "status": "found"}}"#, id);
+                Response::ok().body(&body, "application/json")
+            })))
+            .with(Box::new(LoggingMiddleware))
+            .with(Box::new(TimingMiddleware))
+            .with(Box::new(RequestIdMiddleware)),
+        ),
+    );
 
-    router.post("/media/upload", Box::new(
-        MiddlewareChain::new(Box::new(FnHandler::new(|req, _params| {
-            let size = req.body.len();
-            let body = format!(r#"{{"received": "{} bytes"}}"#, size);
-            Response::ok().body(&body, "application/json")
-        })))
-        .with(Box::new(LoggingMiddleware))
-        .with(Box::new(TimingMiddleware))
-        .with(Box::new(RequestIdMiddleware))
-    ));
+    router.post(
+        "/media/upload",
+        Box::new(
+            MiddlewareChain::new(Box::new(FnHandler::new(|req, _params| {
+                let size = req.body.len();
+                let body = format!(r#"{{"received": "{} bytes"}}"#, size);
+                Response::ok().body(&body, "application/json")
+            })))
+            .with(Box::new(LoggingMiddleware))
+            .with(Box::new(TimingMiddleware))
+            .with(Box::new(RequestIdMiddleware)),
+        ),
+    );
 
-    router.delete("/media/:id", Box::new(
-        MiddlewareChain::new(Box::new(FnHandler::new(|_req, params| {
-            let id = params.get("id").map(|s| s.as_str()).unwrap_or("unknown");
-            let body = format!(r#"{{"deleted": "{}"}}"#, id);
-            Response::ok().body(&body, "application/json")
-        })))
-        .with(Box::new(LoggingMiddleware))
-        .with(Box::new(TimingMiddleware))
-        .with(Box::new(RequestIdMiddleware))
-    ));
+    router.delete(
+        "/media/:id",
+        Box::new(
+            MiddlewareChain::new(Box::new(FnHandler::new(|_req, params| {
+                let id = params.get("id").map(|s| s.as_str()).unwrap_or("unknown");
+                let body = format!(r#"{{"deleted": "{}"}}"#, id);
+                Response::ok().body(&body, "application/json")
+            })))
+            .with(Box::new(LoggingMiddleware))
+            .with(Box::new(TimingMiddleware))
+            .with(Box::new(RequestIdMiddleware)),
+        ),
+    );
 
     router
 }
@@ -180,7 +195,6 @@ async fn handle_connection(mut socket: TcpStream, router: Arc<Router>) {
     // Loop — handle multiple requests on the same connection
     // This is keep-alive — the connection stays open
     loop {
-
         let raw = match read_request(&mut socket, &mut pending).await {
             Ok(raw) => raw,
             Err(ReadError::Closed) => {
@@ -214,10 +228,10 @@ async fn handle_connection(mut socket: TcpStream, router: Arc<Router>) {
                 // HTTP/1.1 default is keep-alive
                 // but the client can send "Connection: close" to signal
                 // they want the connection closed after this response
-                let wants_close = req.header("connection")
+                let wants_close = req
+                    .header("connection")
                     .map(|v| v.to_lowercase() == "close")
                     .unwrap_or(false);
-
 
                 let mut response = router.handle(&req);
 
@@ -234,8 +248,8 @@ async fn handle_connection(mut socket: TcpStream, router: Arc<Router>) {
                 eprintln!("Parse error: {}", e);
                 // On parse error, close the connection
                 // We can't trust anything coming from this client
-                let response = Response::bad_request("Could not parse request")
-                    .header("Connection", "close");
+                let response =
+                    Response::bad_request("Could not parse request").header("Connection", "close");
                 (response, true)
             }
         };
@@ -263,12 +277,11 @@ async fn main() {
     // Arc gives each task a reference-counted pointer to it
     let router = Arc::new(build_router());
 
-
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
     println!("Forge listening on port 8080");
 
     loop {
-        let (socket, addr) = match listener.accept().await{
+        let (socket, addr) = match listener.accept().await {
             Ok(conn) => conn,
             Err(e) => {
                 eprintln!("Accept error: {}", e);
@@ -283,7 +296,6 @@ async fn main() {
         // When the task finishes, the count decrements
         // When count hits 0, the router is dropped
         let router = Arc::clone(&router);
-        
 
         // Spawn an independent task for this connection
         // move takes ownership of socket and router_clone
@@ -331,7 +343,11 @@ mod tests {
     async fn reads_a_body_bigger_than_one_read() {
         let (mut client, mut server) = socket_pair().await;
         let body = vec![b'a'; 10_000];
-        let mut request = format!("POST /media/upload HTTP/1.1\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+        let mut request = format!(
+            "POST /media/upload HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
         request.extend_from_slice(&body);
         client.write_all(&request).await.unwrap();
 
@@ -350,7 +366,11 @@ mod tests {
         let (mut client, mut server) = socket_pair().await;
 
         tokio::spawn(async move {
-            for part in ["POST / HTTP/1.1\r\nCont", "ent-Length: 10\r\n\r\n12345", "67890"] {
+            for part in [
+                "POST / HTTP/1.1\r\nCont",
+                "ent-Length: 10\r\n\r\n12345",
+                "67890",
+            ] {
                 client.write_all(part.as_bytes()).await.unwrap();
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
@@ -383,23 +403,38 @@ mod tests {
             Err(_) => panic!("second read_request failed"),
         };
 
-        assert_eq!((first.path.as_str(), first.body.as_slice()), ("/a", &b"abc"[..]));
+        assert_eq!(
+            (first.path.as_str(), first.body.as_slice()),
+            ("/a", &b"abc"[..])
+        );
         assert_eq!(second.path, "/b");
     }
 
     #[tokio::test]
     async fn rejects_oversized_requests() {
         let (mut client, mut server) = socket_pair().await;
-        let request = format!("POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n", MAX_BODY_SIZE + 1);
+        let request = format!(
+            "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY_SIZE + 1
+        );
         client.write_all(request.as_bytes()).await.unwrap();
         let mut pending = Vec::new();
-        assert!(matches!(read_request(&mut server, &mut pending).await, Err(ReadError::BodyTooLarge)));
+        assert!(matches!(
+            read_request(&mut server, &mut pending).await,
+            Err(ReadError::BodyTooLarge)
+        ));
 
         let (mut client, mut server) = socket_pair().await;
-        let big_header = format!("GET / HTTP/1.1\r\nX-Big: {}\r\n", "a".repeat(MAX_HEADER_SIZE * 2));
+        let big_header = format!(
+            "GET / HTTP/1.1\r\nX-Big: {}\r\n",
+            "a".repeat(MAX_HEADER_SIZE * 2)
+        );
         client.write_all(big_header.as_bytes()).await.unwrap();
         let mut pending = Vec::new();
-        assert!(matches!(read_request(&mut server, &mut pending).await, Err(ReadError::HeadersTooLarge)));
+        assert!(matches!(
+            read_request(&mut server, &mut pending).await,
+            Err(ReadError::HeadersTooLarge)
+        ));
     }
 
     #[tokio::test]
@@ -408,7 +443,10 @@ mod tests {
         drop(client);
 
         let mut pending = Vec::new();
-        assert!(matches!(read_request(&mut server, &mut pending).await, Err(ReadError::Closed)));
+        assert!(matches!(
+            read_request(&mut server, &mut pending).await,
+            Err(ReadError::Closed)
+        ));
     }
 
     #[test]
@@ -417,10 +455,22 @@ mod tests {
         let send = |raw: &[u8]| router.handle(&Request::parse(raw).unwrap());
 
         assert_eq!(send(b"GET / HTTP/1.1\r\n\r\n").status as u16, 200);
-        assert_eq!(send(b"GET /health HTTP/1.1\r\n\r\n").body, br#"{"status": "ok"}"#);
-        assert_eq!(send(b"GET /media/abc HTTP/1.1\r\n\r\n").body, br#"{"id": "abc", "status": "found"}"#);
-        assert_eq!(send(b"POST /media/upload HTTP/1.1\r\n\r\nhello").body, br#"{"received": "5 bytes"}"#);
-        assert_eq!(send(b"DELETE /media/abc HTTP/1.1\r\n\r\n").body, br#"{"deleted": "abc"}"#);
+        assert_eq!(
+            send(b"GET /health HTTP/1.1\r\n\r\n").body,
+            br#"{"status": "ok"}"#
+        );
+        assert_eq!(
+            send(b"GET /media/abc HTTP/1.1\r\n\r\n").body,
+            br#"{"id": "abc", "status": "found"}"#
+        );
+        assert_eq!(
+            send(b"POST /media/upload HTTP/1.1\r\n\r\nhello").body,
+            br#"{"received": "5 bytes"}"#
+        );
+        assert_eq!(
+            send(b"DELETE /media/abc HTTP/1.1\r\n\r\n").body,
+            br#"{"deleted": "abc"}"#
+        );
         assert_eq!(send(b"GET /nope HTTP/1.1\r\n\r\n").status as u16, 404);
     }
 }

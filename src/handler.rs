@@ -20,7 +20,7 @@ where
 }
 
 impl<F> FnHandler<F>
-where 
+where
     F: Fn(&Request, &HashMap<String, String>) -> Response,
 {
     pub fn new(func: F) -> Self {
@@ -31,7 +31,7 @@ where
 // Implement Handler for FnHandler
 // Now any function with the right signature IS a Handler
 impl<F> Handler for FnHandler<F>
-where 
+where
     F: Fn(&Request, &HashMap<String, String>) -> Response,
 {
     fn handle(&self, req: &Request, params: &HashMap<String, String>) -> Response {
