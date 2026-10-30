@@ -4,18 +4,14 @@ mod request;
 mod response;
 mod router;
 
-use handler::{FnHandler, Handler};
+use handler::FnHandler;
 use middleware::{LoggingMiddleware, MiddlewareChain, RequestIdMiddleware, TimingMiddleware};
 use request::Request;
 use response::{Response, StatusCode};
 use router::Router;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-
-use std::thread;
-use std::time::Duration;
 
 fn build_router() -> Router {
     let mut router = Router::new();

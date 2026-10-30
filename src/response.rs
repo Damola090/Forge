@@ -10,6 +10,10 @@ pub struct Response {
 
 // Status codes as a typed enum
 // Not magic numbers — named variants the compiler checks
+// Some codes aren't used by any handler yet (Created, NoContent,
+// MethodNotAllowed, InternalServerError) — they're the vocabulary
+// the MediaLab handlers will need, so don't warn about them
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum StatusCode {
     Ok = 200,
@@ -64,6 +68,8 @@ impl Response {
         Self::new(StatusCode::BadRequest).body(msg, "text/plain")
     }
 
+    // Not used yet — for handlers that can fail (Layer 8)
+    #[allow(dead_code)]
     pub fn internal_error() -> Self {
         Self::new(StatusCode::InternalServerError).body("Internal Server Error", "text/plain")
     }
@@ -78,6 +84,8 @@ impl Response {
     }
 
     // For binary responses — images, video bytes, downloads
+    // Not used yet — MediaLab will serve media through it (Layer 8)
+    #[allow(dead_code)]
     pub fn bytes(mut self, data: Vec<u8>, content_type: &str) -> Self {
         self.body = data;
         self.headers
